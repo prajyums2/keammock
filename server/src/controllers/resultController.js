@@ -53,9 +53,24 @@ export async function startTest(req, res) {
     if (assignment.dueDate && new Date() > new Date(assignment.dueDate)) return errorResponse(res, 'This test assignment has expired.', 403);
     if (assignment.attemptsUsed >= assignment.attemptsAllowed) return errorResponse(res, `Maximum attempts reached (${assignment.attemptsAllowed}).`, 403);
 
+    // Check for existing in-progress test
     const existingResult = await Result.findOne({ userId: req.userId, examId, status: 'in_progress' });
     if (existingResult) {
-      return successResponse(res, { resultId: existingResult._id, startedAt: existingResult.startedAt }, 'Existing test session found');
+      // Check if the existing session is too old (more than exam duration + 5 min buffer)
+      const exam = await Exam.findById(examId);
+      const maxDuration = exam ? exam.duration * 60 * 1000 + 5 * 60 * 1000 : 185 * 60 * 1000;
+      const sessionAge = Date.now() - new Date(existingResult.startedAt).getTime();
+      
+      if (sessionAge < maxDuration) {
+        // Session is valid, return existing
+        return successResponse(res, { resultId: existingResult._id, startedAt: existingResult.startedAt }, 'Existing test session found');
+      } else {
+        // Session expired, mark as timed_out and create new one
+        existingResult.status = 'timed_out';
+        existingResult.suspiciousActivity = existingResult.suspiciousActivity || [];
+        existingResult.suspiciousActivity.push({ type: 'session_timeout', timestamp: new Date(), reason: 'Session expired due to inactivity' });
+        await existingResult.save();
+      }
     }
 
     const exam = await Exam.findById(examId);
