@@ -25,8 +25,6 @@ export default function TestInterface() {
   const [showScratchpad, setShowScratchpad] = useState(false);
   const [scratchpadText, setScratchpadText] = useState('');
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [disconnectCount, setDisconnectCount] = useState(0);
 
   const answersRef = useRef(answers);
   const timeRemainingRef = useRef(timeRemaining);
@@ -101,76 +99,6 @@ export default function TestInterface() {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, []);
 
-  // Window blur detection - different from tab switch
-  useEffect(() => {
-    if (loading) return;
-    
-    let blurCount = 0;
-    const handleBlur = () => {
-      blurCount++;
-      if (blurCount >= 3 && tabSwitchCountRef.current >= 3) {
-        toast.error('Test submitted due to violations!');
-        handleSubmitTest();
-      } else if (blurCount > tabSwitchCountRef.current) {
-        // Sync blur count with tab switch count for unified tracking
-        const newCount = Math.max(tabSwitchCountRef.current, blurCount);
-        if (newCount >= 3) {
-          toast.error('Test submitted due to violations!');
-          handleSubmitTest();
-        } else {
-          toast.warning(`Warning ${newCount}/3: Window lost focus.`);
-        }
-      }
-    };
-    
-    window.addEventListener('blur', handleBlur);
-    return () => window.removeEventListener('blur', handleBlur);
-  }, [loading]);
-
-  // Prevent PrintScreen key
-  useEffect(() => {
-    if (loading) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'PrintScreen') {
-        e.preventDefault();
-        toast.error('Screenshots are not allowed during the test');
-      }
-    };
-    document.addEventListener('keyup', handleKeyDown);
-    return () => document.removeEventListener('keyup', handleKeyDown);
-  }, [loading]);
-
-  // Periodic heartbeat to detect connection issues
-  useEffect(() => {
-    if (loading) return;
-    
-    const heartbeatInterval = setInterval(() => {
-      // Just trigger a save to keep session alive
-      saveProgressMutation.mutate();
-    }, 60000); // Every minute
-    
-    return () => clearInterval(heartbeatInterval);
-  }, [loading]);
-
-  // Prevent iframe embedding (anti-cheat)
-  useEffect(() => {
-    if (window.self !== window.top) {
-      window.top.location = window.self.location;
-    }
-  }, []);
-
-  // Disable drag and drop
-  useEffect(() => {
-    if (loading) return;
-    const preventDrag = (e: Event) => e.preventDefault();
-    document.addEventListener('dragstart', preventDrag, true);
-    document.addEventListener('drop', preventDrag, true);
-    return () => {
-      document.removeEventListener('dragstart', preventDrag, true);
-      document.removeEventListener('drop', preventDrag, true);
-    };
-  }, [loading]);
-
   useEffect(() => {
     if (loading) return;
     const prevent = (e: Event) => { e.preventDefault(); e.stopPropagation(); return false; };
@@ -185,37 +113,6 @@ export default function TestInterface() {
     document.addEventListener('keydown', preventKeys, true);
     return () => { document.body.style.userSelect = ''; document.removeEventListener('copy', prevent, true); document.removeEventListener('cut', prevent, true); document.removeEventListener('paste', prevent, true); document.removeEventListener('contextmenu', prevent, true); document.removeEventListener('keydown', preventKeys, true); };
   }, [loading]);
-
-  // Network disconnect detection
-  useEffect(() => {
-    if (loading) return;
-    
-    const handleOnline = () => {
-      setIsOnline(true);
-      saveProgressMutation.mutate();
-      toast.success('Connection restored. Progress saved.');
-    };
-    
-    const handleOffline = () => {
-      setIsOnline(false);
-      const count = disconnectCount + 1;
-      setDisconnectCount(count);
-      if (count >= 2) {
-        toast.error('Test submitted due to connection issues.');
-        handleSubmitTest();
-      } else {
-        toast.error(`Connection lost! Warning ${count}/2. Reconnecting...`);
-      }
-    };
-    
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, [loading, disconnectCount]);
 
   const saveProgressMutation = useMutation({
     mutationFn: () => resultAPI.saveProgress({ resultId, answers: answersRef.current, timeTaken: (examRef.current?.duration || 0) * 60 - timeRemainingRef.current, tabSwitchCount: tabSwitchCountRef.current }),
@@ -311,10 +208,6 @@ export default function TestInterface() {
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-1 text-xs text-gray-500">
                 <Eye className="w-4 h-4 text-green-600" /><span className="font-medium">Secured</span>
-              </div>
-              <div className={`flex items-center space-x-1 text-xs px-2 py-1 rounded ${isOnline ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></span>
-                <span>{isOnline ? 'Online' : 'Offline'}</span>
               </div>
               {lastSavedAt && <div className="flex items-center space-x-1 text-xs text-gray-500"><CheckCircle className="w-3 h-3" /><span>Saved {lastSavedAt.toLocaleTimeString()}</span></div>}
               <div className={`flex items-center font-mono text-xl font-bold px-4 py-2 rounded-lg ${timeRemaining < 300 ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-gray-100'}`}>
